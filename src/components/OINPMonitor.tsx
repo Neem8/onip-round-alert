@@ -7,11 +7,13 @@ import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/components/ui/use-toast';
-import { Bell, Calendar, Users, AlertCircle, CheckCircle, Settings } from 'lucide-react';
+import { Bell, Calendar, Users, AlertCircle, CheckCircle, Settings, MessageCircle } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { TelegramSetupGuide } from './TelegramSetupGuide';
 
 interface MonitorSettings {
-  zapierWebhook: string;
+  telegramBotToken: string;
+  telegramChatId: string;
   emailNotifications: boolean;
   checkInterval: number;
   isActive: boolean;
@@ -28,7 +30,8 @@ interface RoundData {
 export const OINPMonitor = () => {
   const { toast } = useToast();
   const [settings, setSettings] = useState<MonitorSettings>({
-    zapierWebhook: '',
+    telegramBotToken: '',
+    telegramChatId: '',
     emailNotifications: false,
     checkInterval: 30,
     isActive: false,
@@ -70,60 +73,83 @@ export const OINPMonitor = () => {
 
   const sendNotification = async (rounds: RoundData[]) => {
     try {
-      // Send Zapier webhook notification
-      if (settings.zapierWebhook) {
-        await fetch(settings.zapierWebhook, {
+      // Send Telegram notification
+      if (settings.telegramBotToken && settings.telegramChatId) {
+        const message = `🚨 *New OINP Round${rounds.length > 1 ? 's' : ''} Open!*\n\n${rounds.map(round => 
+          `📅 *${round.type}*\n` +
+          `👥 Invitations: ${round.invitations}\n` +
+          `📊 Min Score: ${round.minScore || 'N/A'}\n` +
+          `🎯 Streams: ${round.streams.join(', ')}\n`
+        ).join('\n')}\n⏰ Detected: ${new Date().toLocaleString()}`;
+
+        const response = await fetch(`https://api.telegram.org/bot${settings.telegramBotToken}/sendMessage`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          mode: 'no-cors',
+          headers: {
+            'Content-Type': 'application/json',
+          },
           body: JSON.stringify({
-            type: 'oinp_round_open',
-            timestamp: new Date().toISOString(),
-            rounds: rounds,
-            message: `🚨 New OINP Round${rounds.length > 1 ? 's' : ''} Open! ${rounds.length} invitation round${rounds.length > 1 ? 's' : ''} detected.`
+            chat_id: settings.telegramChatId,
+            text: message,
+            parse_mode: 'Markdown'
           }),
         });
-      }
 
-      toast({
-        title: "🎉 New OINP Round Detected!",
-        description: `${rounds.length} new invitation round${rounds.length > 1 ? 's' : ''} found`,
-      });
+        if (response.ok) {
+          toast({
+            title: "✅ Telegram Notification Sent!",
+            description: `Notified about ${rounds.length} new round${rounds.length > 1 ? 's' : ''}`,
+          });
+        } else {
+          throw new Error('Failed to send Telegram message');
+        }
+      }
     } catch (error) {
       console.error('Error sending notification:', error);
+      toast({
+        title: "Error",
+        description: "Failed to send Telegram notification",
+        variant: "destructive",
+      });
     }
   };
 
   const testNotification = async () => {
-    if (!settings.zapierWebhook) {
+    if (!settings.telegramBotToken || !settings.telegramChatId) {
       toast({
         title: "Error",
-        description: "Please enter your Zapier webhook URL first",
+        description: "Please enter your Telegram bot token and chat ID first",
         variant: "destructive",
       });
       return;
     }
 
     try {
-      await fetch(settings.zapierWebhook, {
+      const testMessage = `🧪 *Test Notification*\n\nYour OINP monitor is working correctly!\n\n⏰ ${new Date().toLocaleString()}`;
+      
+      const response = await fetch(`https://api.telegram.org/bot${settings.telegramBotToken}/sendMessage`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        mode: 'no-cors',
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({
-          type: 'test_notification',
-          timestamp: new Date().toISOString(),
-          message: '🧪 Test notification from OINP Monitor'
+          chat_id: settings.telegramChatId,
+          text: testMessage,
+          parse_mode: 'Markdown'
         }),
       });
 
-      toast({
-        title: "Test Sent",
-        description: "Test notification sent to your Zapier webhook",
-      });
+      if (response.ok) {
+        toast({
+          title: "✅ Test Sent Successfully",
+          description: "Check your Telegram for the test message",
+        });
+      } else {
+        throw new Error('Failed to send test message');
+      }
     } catch (error) {
       toast({
         title: "Error",
-        description: "Failed to send test notification",
+        description: "Failed to send test notification. Check your bot token and chat ID.",
         variant: "destructive",
       });
     }
@@ -160,9 +186,10 @@ export const OINPMonitor = () => {
       </Card>
 
       <Tabs defaultValue="monitor" className="w-full">
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="monitor">Monitor</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
+          <TabsTrigger value="setup">Setup</TabsTrigger>
           <TabsTrigger value="history">History</TabsTrigger>
         </TabsList>
 
@@ -237,22 +264,36 @@ export const OINPMonitor = () => {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <Settings className="h-4 w-4" />
-                Notification Settings
+                <MessageCircle className="h-4 w-4" />
+                Telegram Notification Settings
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="webhook">Zapier Webhook URL</Label>
+                <Label htmlFor="botToken">Telegram Bot Token</Label>
                 <Input
-                  id="webhook"
-                  type="url"
-                  placeholder="https://hooks.zapier.com/hooks/catch/..."
-                  value={settings.zapierWebhook}
-                  onChange={(e) => handleSettingsChange('zapierWebhook', e.target.value)}
+                  id="botToken"
+                  type="password"
+                  placeholder="1234567890:ABCdefGhIJKlmNoPQRstUVwxyZ..."
+                  value={settings.telegramBotToken}
+                  onChange={(e) => handleSettingsChange('telegramBotToken', e.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Create a Zapier webhook trigger and paste the URL here to receive notifications
+                  Create a bot with @BotFather on Telegram and paste the token here
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="chatId">Your Telegram Chat ID</Label>
+                <Input
+                  id="chatId"
+                  type="text"
+                  placeholder="123456789 or -123456789"
+                  value={settings.telegramChatId}
+                  onChange={(e) => handleSettingsChange('telegramChatId', e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Send /start to your bot, then get your chat ID from @userinfobot
                 </p>
               </div>
 
@@ -283,6 +324,10 @@ export const OINPMonitor = () => {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+        
+        <TabsContent value="setup" className="space-y-4">
+          <TelegramSetupGuide />
         </TabsContent>
 
         <TabsContent value="history" className="space-y-4">
